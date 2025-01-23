@@ -10,6 +10,8 @@
 "user": ["oC6BG6LGN1oKvuNOHedDU-yDZXVA","oC6BG6DZ5MQyH3LVZfTF4KZJ_kQw"],
 
 # 信息配置
+# 和风天气apikey
+"weather_key": "0e13c93a25c74622a3449ce19b21b6ac",
 # 所在省份
 "province": "广西",
 # 所在城市
@@ -20,4 +22,8 @@
 #"birthday2": {"name": "小木頭", "birthday": "r2000-09-21"},
 # 在一起的日子，格式同上
 "love_date": "2023-03-13"
+# 金句中文，如果设置了，则会显示这里的，如果为空，默认会读取金山的每日金句
+"note_ch": "",
+# 金句英文
+"note_en": ""
 }
