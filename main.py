@@ -6,6 +6,14 @@ from datetime import datetime, date
 from zhdate import ZhDate
 import sys
 import os
+import ast
+import json
+import argparse
+from pathlib import Path
+from datetime import timezone, timedelta
+
+BASE_DIR = Path(__file__).resolve().parent
+BEIJING = timezone(timedelta(hours=8))
 
 
 # def get_color():
@@ -26,10 +34,9 @@ def get_access_token():
     post_url = ("https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={}&secret={}"
                 .format(app_id, app_secret))
     try:
-        access_token = get(post_url).json()['access_token']
+        access_token = get(post_url, timeout=20).json()['access_token']
     except KeyError:
         print("获取access_token失败，请检查app_id和app_secret是否正确")
-        os.system("pause")
         sys.exit(1)
     # print(access_token)
     return access_token
@@ -41,7 +48,6 @@ def get_weather(province, city):
         city_id = cityinfo.cityInfo[province][city]["AREAID"]
     except KeyError:
         print("推送消息失败，请检查省份或城市是否正确")
-        os.system("pause")
         sys.exit(1)
     # city_id = 101280101
     # 毫秒级时间戳
@@ -52,10 +58,11 @@ def get_weather(province, city):
                       'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36'
     }
     url = "http://d1.weather.com.cn/dingzhi/{}.html?_={}".format(city_id, t)
-    response = get(url, headers=headers)
+    response = get(url, headers=headers, timeout=20)
+    response.raise_for_status()
     response.encoding = "utf-8"
     response_data = response.text.split(";")[0].split("=")[-1]
-    response_json = eval(response_data)
+    response_json = json.loads(response_data)
     # print(response_json)
     weatherinfo = response_json["weatherinfo"]
     # 天气
@@ -102,27 +109,28 @@ def get_birthday(birthday, year, today):
 
 
 def get_ciba():
-    url = "http://open.iciba.com/dsapi/"
-    headers = {
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                      'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36'
-    }
-    r = get(url, headers=headers)
-    # note_en = r.json()["content"]
-    # note_ch = r.json()["note"]
-    note_ch = "愿你今天也有好心情。"
-    note_en = "May your day be full of joy."
+    note_ch = str(config.get("note_ch") or "").strip()
+    note_en = str(config.get("note_en") or "").strip()
+    if note_ch and note_en:
+        return note_ch, note_en
+    try:
+        r = get("https://open.iciba.com/dsapi/", timeout=15)
+        r.raise_for_status()
+        quote = r.json()
+        note_ch = note_ch or str(quote.get("note") or "").strip()
+        note_en = note_en or str(quote.get("content") or "").strip()
+    except (ValueError, OSError) as exc:
+        print("每日金句接口不可用，使用备用文案：", type(exc).__name__)
+    note_ch = note_ch or "愿你今天也有好心情。"
+    note_en = note_en or "May your day be full of joy."
     return note_ch, note_en
 
 
-def send_message(to_user, access_token, city_name, weather, max_temperature, min_temperature, note_ch, note_en):
+def send_message(to_user, access_token, city_name, weather, max_temperature, min_temperature, note_ch, note_en, preview=False):
     url = "https://api.weixin.qq.com/cgi-bin/message/template/send?access_token={}".format(access_token)
     week_list = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"]
-    year = localtime().tm_year
-    month = localtime().tm_mon
-    day = localtime().tm_mday
-    today = datetime.date(datetime(year=year, month=month, day=day))
+    today = datetime.now(BEIJING).date()
+    year = today.year
     week = week_list[today.isoweekday() % 7]
     # 获取在一起的日子的日期格式
     love_year = int(config["love_date"].split("-")[0])
@@ -139,7 +147,6 @@ def send_message(to_user, access_token, city_name, weather, max_temperature, min
     data = {
         "touser": to_user,
         "template_id": config["template_id"],
-        "url": "http://weixin.qq.com/download",
         "topcolor": "#FF0000",
         "data": {
             "date": {
@@ -190,7 +197,16 @@ def send_message(to_user, access_token, city_name, weather, max_temperature, min
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
                       'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36'
     }
-    response = post(url, headers=headers, json=data).json()
+    print("北京时间：", datetime.now(BEIJING).isoformat(timespec="seconds"))
+    print("模板 ID：", data["template_id"])
+    print("发送字段（不含密钥和接收用户）：")
+    print(json.dumps(data["data"], ensure_ascii=False, indent=2))
+    if preview:
+        print("本地预览完成，未调用微信发送接口。")
+        return data
+    result = post(url, headers=headers, json=data, timeout=20)
+    result.raise_for_status()
+    response = result.json()
     if response["errcode"] == 40037:
         print("推送消息失败，请检查模板id是否正确")
     elif response["errcode"] == 40036:
@@ -201,31 +217,40 @@ def send_message(to_user, access_token, city_name, weather, max_temperature, min
         print("推送消息成功")
     else:
         print(response)
+    if response.get("errcode") != 0:
+        raise RuntimeError("微信发送失败，错误码：{}".format(response.get("errcode")))
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--preview", action="store_true", help="离线预览字段，不联网、不发送消息")
+    args = parser.parse_args()
     try:
-        with open("config.txt", encoding="utf-8") as f:
-            config = eval(f.read())
+        with open(BASE_DIR / "config.txt", encoding="utf-8-sig") as f:
+            config = ast.literal_eval(f.read())
     except FileNotFoundError:
         print("推送消息失败，请检查config.txt文件是否与程序位于同一路径")
-        os.system("pause")
         sys.exit(1)
-    except SyntaxError:
+    except (SyntaxError, ValueError):
         print("推送消息失败，请检查配置文件格式是否正确")
-        os.system("pause")
         sys.exit(1)
 
     # 获取accessToken
-    accessToken = get_access_token()
+    accessToken = "" if args.preview else get_access_token()
     # 接收的用户
     users = config["user"]
     # 传入省份和市获取天气信息
     province, city = config["province"], config["city"]
-    weather, max_temperature, min_temperature = get_weather(province, city)
+    if args.preview:
+        weather, max_temperature, min_temperature = "预览示例：晴", "28", "20"
+    else:
+        weather, max_temperature, min_temperature = get_weather(province, city)
     # 获取词霸每日金句
-    note_ch, note_en = get_ciba()
+    if args.preview:
+        note_ch = config.get("note_ch") or "愿你今天也有好心情。"
+        note_en = config.get("note_en") or "May your day be full of joy."
+    else:
+        note_ch, note_en = get_ciba()
     # 公众号推送消息
     for user in users:
-        send_message(user, accessToken, city, weather, max_temperature, min_temperature, note_ch, note_en)
-    os.system("pause")
+        send_message(user, accessToken, city, weather, max_temperature, min_temperature, note_ch, note_en, preview=args.preview)
