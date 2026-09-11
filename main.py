@@ -8,11 +8,14 @@ import sys
 import os
 
 
+# def get_color():
+#     # 获取随机颜色
+#     get_colors = lambda n: list(map(lambda i: "#" + "%06x" % random.randint(0, 0xFFFFFF), range(n)))
+#     color_list = get_colors(100)
+#     return random.choice(color_list)
+
 def get_color():
-    # 获取随机颜色
-    get_colors = lambda n: list(map(lambda i: "#" + "%06x" % random.randint(0, 0xFFFFFF), range(n)))
-    color_list = get_colors(100)
-    return random.choice(color_list)
+    return "#FF0000"
 
 
 def get_access_token():
@@ -106,8 +109,10 @@ def get_ciba():
                       'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36'
     }
     r = get(url, headers=headers)
-    note_en = r.json()["content"]
-    note_ch = r.json()["note"]
+    # note_en = r.json()["content"]
+    # note_ch = r.json()["note"]
+    note_ch = "愿你今天也有好心情。"
+    note_en = "May your day be full of joy."
     return note_ch, note_en
 
 
